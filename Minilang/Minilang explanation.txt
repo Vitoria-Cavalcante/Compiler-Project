@@ -1,0 +1,1215 @@
+
+O projeto que eu montei segue exatamente a estrutura do pedido da professora, só com uma escolha técnica importante: em vez de gerar Assembly x86/MIPS real, ele gera bytecode para uma máquina virtual própria, que o próprio projeto executa.
+
+Pelo enunciado dela, os pedidos eram:
+
+Pedido da professora	O projeto faz?
+Análise Léxica / Scanner	Sim
+Reconhecer palavras reservadas, identificadores, números, strings/literais e operadores	Sim, exceto string se não tiver sido incluída no escopo principal
+Ignorar espaços e comentários	Sim
+Análise Sintática / Parser	Sim
+Construção da AST	Sim
+Análise Semântica	Sim
+Tabela de símbolos	Sim
+Verificação de tipos	Sim
+Variáveis declaradas previamente e escopo	Sim
+Código Intermediário	Sim
+TAC / Código de Três Endereços	Sim
+Código Final	Sim
+Assembly ou Bytecode para VM específica	Sim, usa bytecode
+Otimização opcional	Pode ser incluída depois como bônus
+Tipos int e bool	Sim
+if-else	Sim
+while	Sim
+Operações aritméticas e lógicas	Sim
+print e read	Sim
+
+
+
+
+
+const {
+  Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
+  HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
+  VerticalAlign, PageNumber, PageBreak, LevelFormat, Header, Footer,
+  TabStopType, TabStopPosition
+} = require('/home/claude/.npm-global/lib/node_modules/docx');
+const fs = require('fs');
+
+// ─── Paleta de cores ───────────────────────────────────────────────────────
+const C = {
+  blue:    "1F4E79",
+  blue2:   "2E75B6",
+  blue3:   "BDD7EE",
+  blue4:   "DEEAF1",
+  gray:    "404040",
+  gray2:   "595959",
+  gray3:   "D9D9D9",
+  white:   "FFFFFF",
+  orange:  "C55A11",
+  green:   "375623",
+  green2:  "E2EFDA",
+  red:     "9C0006",
+  red2:    "FFCCCC",
+  code:    "F2F2F2",
+};
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+const br = new Paragraph({ children: [new TextRun("")], spacing: { after: 80 } });
+
+function h1(text) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_1,
+    children: [new TextRun({ text, bold: true, size: 36, color: C.white, font: "Arial" })],
+    shading: { fill: C.blue, type: ShadingType.CLEAR },
+    spacing: { before: 360, after: 200 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: C.blue2, space: 2 } },
+  });
+}
+
+function h2(text) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_2,
+    children: [new TextRun({ text, bold: true, size: 28, color: C.blue, font: "Arial" })],
+    spacing: { before: 280, after: 120 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 2, color: C.blue3, space: 1 } },
+  });
+}
+
+function h3(text) {
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_3,
+    children: [new TextRun({ text, bold: true, size: 24, color: C.blue2, font: "Arial" })],
+    spacing: { before: 200, after: 80 },
+  });
+}
+
+function p(text, opts = {}) {
+  return new Paragraph({
+    children: [new TextRun({ text, size: 22, color: C.gray, font: "Arial", ...opts })],
+    spacing: { after: 120 },
+  });
+}
+
+function pBold(text) {
+  return new Paragraph({
+    children: [new TextRun({ text, size: 22, bold: true, color: C.gray, font: "Arial" })],
+    spacing: { after: 80 },
+  });
+}
+
+function code(text) {
+  return new Paragraph({
+    children: [new TextRun({ text, font: "Courier New", size: 18, color: C.orange })],
+    shading: { fill: C.code, type: ShadingType.CLEAR },
+    spacing: { before: 40, after: 40 },
+    indent: { left: 360 },
+  });
+}
+
+function bullet(text, level = 0) {
+  return new Paragraph({
+    numbering: { reference: "bullets", level },
+    children: [new TextRun({ text, size: 22, color: C.gray, font: "Arial" })],
+    spacing: { after: 80 },
+  });
+}
+
+function nb(text, level = 0) {
+  return new Paragraph({
+    numbering: { reference: "numbers", level },
+    children: [new TextRun({ text, size: 22, color: C.gray, font: "Arial" })],
+    spacing: { after: 80 },
+  });
+}
+
+function mixed(...runs) {
+  return new Paragraph({
+    children: runs,
+    spacing: { after: 120 },
+  });
+}
+function run(text, opts = {}) {
+  return new TextRun({ text, size: 22, color: C.gray, font: "Arial", ...opts });
+}
+function runCode(text) {
+  return new TextRun({ text, font: "Courier New", size: 18, color: C.orange });
+}
+
+function calloutBox(title, content, fill = C.blue4) {
+  const borderDef = { style: BorderStyle.SINGLE, size: 6, color: C.blue2 };
+  const rows = [];
+  if (title) {
+    rows.push(new TableRow({
+      children: [new TableCell({
+        shading: { fill: C.blue2, type: ShadingType.CLEAR },
+        margins: { top: 80, bottom: 80, left: 160, right: 160 },
+        borders: { top: borderDef, bottom: borderDef, left: borderDef, right: borderDef },
+        children: [new Paragraph({
+          children: [new TextRun({ text: title, bold: true, size: 20, color: C.white, font: "Arial" })]
+        })]
+      })]
+    }));
+  }
+  rows.push(new TableRow({
+    children: [new TableCell({
+      shading: { fill, type: ShadingType.CLEAR },
+      margins: { top: 120, bottom: 120, left: 200, right: 200 },
+      borders: { top: borderDef, bottom: borderDef, left: borderDef, right: borderDef },
+      children: content
+    })]
+  }));
+  return new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: [9360],
+    rows,
+  });
+}
+
+function twoColTable(headers, rows_data, widths = [2200, 7160]) {
+  const headerBorder = { style: BorderStyle.SINGLE, size: 4, color: C.blue2 };
+  const cellBorder   = { style: BorderStyle.SINGLE, size: 1, color: C.gray3  };
+
+  function makeCell(text, isHeader = false, w = widths[0]) {
+    return new TableCell({
+      width: { size: w, type: WidthType.DXA },
+      shading: { fill: isHeader ? C.blue : C.white, type: ShadingType.CLEAR },
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
+      borders: { top: isHeader ? headerBorder : cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder },
+      verticalAlign: VerticalAlign.TOP,
+      children: [new Paragraph({
+        children: [new TextRun({
+          text, size: 20, font: "Arial",
+          color: isHeader ? C.white : C.gray,
+          bold: isHeader,
+        })]
+      })]
+    });
+  }
+
+  const tableRows = [];
+  if (headers && headers.length) {
+    tableRows.push(new TableRow({
+      children: headers.map((h, i) => makeCell(h, true, widths[i]))
+    }));
+  }
+  for (const row of rows_data) {
+    tableRows.push(new TableRow({
+      children: row.map((cell, i) => makeCell(cell, false, widths[i]))
+    }));
+  }
+  return new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: widths,
+    rows: tableRows,
+  });
+}
+
+function threeColTable(headers, rows_data, widths = [2000, 2500, 4860]) {
+  const headerBorder = { style: BorderStyle.SINGLE, size: 4, color: C.blue2 };
+  const cellBorder   = { style: BorderStyle.SINGLE, size: 1, color: C.gray3  };
+
+  function makeCell(text, isHeader = false, w = widths[0]) {
+    return new TableCell({
+      width: { size: w, type: WidthType.DXA },
+      shading: { fill: isHeader ? C.blue : C.white, type: ShadingType.CLEAR },
+      margins: { top: 80, bottom: 80, left: 120, right: 120 },
+      borders: { top: isHeader ? headerBorder : cellBorder, bottom: cellBorder, left: cellBorder, right: cellBorder },
+      verticalAlign: VerticalAlign.TOP,
+      children: [new Paragraph({
+        children: [new TextRun({
+          text, size: 20, font: "Arial",
+          color: isHeader ? C.white : C.gray,
+          bold: isHeader,
+        })]
+      })]
+    });
+  }
+
+  const tableRows = [];
+  if (headers && headers.length) {
+    tableRows.push(new TableRow({
+      children: headers.map((h, i) => makeCell(h, true, widths[i]))
+    }));
+  }
+  for (const row of rows_data) {
+    tableRows.push(new TableRow({
+      children: row.map((cell, i) => makeCell(cell, false, widths[i]))
+    }));
+  }
+  return new Table({
+    width: { size: 9360, type: WidthType.DXA },
+    columnWidths: widths,
+    rows: tableRows,
+  });
+}
+
+// ─── Capa ──────────────────────────────────────────────────────────────────
+function pageCover() {
+  return [
+    new Paragraph({ spacing: { after: 1800 }, children: [new TextRun("")] }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: "MiniLang Compiler", bold: true, size: 72, color: C.blue, font: "Arial" })],
+      spacing: { after: 200 },
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: "Documentação Técnica Completa", size: 40, color: C.blue2, font: "Arial" })],
+      spacing: { after: 120 },
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: "Análise aprofundada de arquitetura, pipeline e implementação", size: 24, color: C.gray2, font: "Arial", italics: true })],
+      spacing: { after: 600 },
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      shading: { fill: C.blue3, type: ShadingType.CLEAR },
+      children: [new TextRun({ text: "Python 3.13  •  Linguagem .mini  •  Máquina Virtual por Pilha", size: 22, color: C.blue, font: "Arial" })],
+      spacing: { before: 120, after: 120 },
+    }),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 1 — VISÃO GERAL
+// ═══════════════════════════════════════════════════════════════════
+function section1() {
+  return [
+    h1("1. O que é o MiniLang Compiler e para que serve"),
+    br,
+    p("O MiniLang Compiler é um compilador completo, didático e funcional escrito em Python 3.13. Ele implementa todas as fases clássicas de um compilador — da análise léxica à execução em máquina virtual — para uma linguagem de programação simples chamada Mini (arquivos .mini)."),
+    br,
+    h2("1.1  Propósito e contexto"),
+    p("A linguagem Mini foi criada como veículo de aprendizado para ilustrar os conceitos fundamentais de construção de compiladores: análise léxica, sintática e semântica, geração de código intermediário, geração de bytecode e execução em uma VM baseada em pilha."),
+    p("Apesar de ser didática, o compilador é totalmente operacional: recebe um arquivo de texto .mini, passa por todas as seis fases de processamento e produz output real (impressão na tela), podendo inclusive ler entradas do usuário em tempo de execução."),
+    br,
+    h2("1.2  O que a linguagem Mini suporta"),
+    twoColTable(
+      ["Recurso", "Sintaxe / Exemplo"],
+      [
+        ["Tipos de dados", "int, bool, string (literal)"],
+        ["Declaração de variável", "int x;  /  bool flag;"],
+        ["Atribuição", "x = 10;  /  flag = x > 5;"],
+        ["Entrada do usuário", "x = read();"],
+        ["Saída", "print(x);  /  print(\"oi\");"],
+        ["Condicional", "if (cond) { ... } else { ... }"],
+        ["Laço", "while (cond) { ... }"],
+        ["Operadores aritméticos", "+ – * /  (inteiros)"],
+        ["Operadores comparativos", "< >  (retornam bool)"],
+        ["Operadores de igualdade", "== !=  (mesmo tipo)"],
+        ["Operador unário", "-x  (negação inteira)"],
+        ["Comentários", "// linha   e   /* bloco */"],
+      ],
+      [3200, 6160]
+    ),
+    br,
+    h2("1.3  Pipeline de 6 fases"),
+    p("O compilador processa o código-fonte em seis estágios sequenciais. A saída de cada fase alimenta a próxima, formando um pipeline clássico de compilação:"),
+    twoColTable(
+      ["Fase", "Responsabilidade"],
+      [
+        ["① Lexer (Analisador Léxico)", "Transforma texto bruto em sequência de tokens."],
+        ["② Parser (Analisador Sintático)", "Constrói a Árvore Sintática Abstrata (AST) a partir dos tokens."],
+        ["③ Semantic (Analisador Semântico)", "Verifica tipos e declaração de variáveis via tabela de símbolos."],
+        ["④ IR Generator", "Gera código intermediário de três endereços (IR) legível por humanos."],
+        ["⑤ Code Generator (Bytecode)", "Traduz a AST para bytecode de pilha (lista de strings)."],
+        ["⑥ Virtual Machine", "Interpreta e executa o bytecode, gerenciando pilha e variáveis."],
+      ],
+      [3200, 6160]
+    ),
+    br,
+    calloutBox("⚠️  Observação sobre mapeamento de arquivos", [
+      p("Os arquivos enviados tiveram seus nomes embaralhados pelo sistema de upload. O mapeamento real é:"),
+      code("parser.py      → contém: ast_nodes     (nós da AST)"),
+      code("semantic.py    → contém: lexer.py       (analisador léxico)"),
+      code("ir_generator.py → contém: parser.py     (analisador sintático)"),
+      code("code_generator.py → contém: semantic.py (análise semântica)"),
+      code("vm.py          → contém: ir_generator   (geração de IR)"),
+      code("main.py        → contém: code_generator (geração de bytecode)"),
+      code("README.md      → contém: vm.py          (máquina virtual)"),
+      p("Toda a documentação a seguir refere-se ao conteúdo real (classe), não ao nome do arquivo."),
+    ], C.red2),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 2 — ARQUITETURA E MÓDULOS
+// ═══════════════════════════════════════════════════════════════════
+function section2() {
+  return [
+    h1("2. Arquitetura Geral — Módulos e Relacionamentos"),
+    br,
+    p("O compilador é estruturado em sete módulos Python independentes, cada um contendo uma classe principal. A dependência entre eles é estritamente linear (exceto o main.py que orquestra tudo):"),
+    br,
+    twoColTable(
+      ["Módulo (conteúdo real)", "Classe principal / Responsabilidade"],
+      [
+        ["ast_nodes.py", "Hierarquia de dataclasses que representam cada nó da AST."],
+        ["lexer.py", "Token + Lexer — tokenização do código-fonte caractere a caractere."],
+        ["parser.py", "Parser — análise sintática descendente recursiva (RDP); constrói a AST."],
+        ["semantic.py", "SymbolTable + SemanticAnalyzer — verificação de tipos e escopo."],
+        ["ir_generator.py", "IRGenerator — geração de código de três endereços (TAC)."],
+        ["code_generator.py", "BytecodeGenerator — traduz AST para bytecode de pilha."],
+        ["vm.py", "VirtualMachine — executa o bytecode usando pilha de valores."],
+      ],
+      [2800, 6560]
+    ),
+    br,
+    h2("2.1  Fluxo de dados entre módulos"),
+    p("Cada módulo recebe a saída do anterior e produz uma representação mais próxima da execução:"),
+    br,
+    calloutBox("Cadeia de transformações", [
+      code("Arquivo .mini (texto puro)"),
+      code("      ↓ [Lexer]"),
+      code("List[Token]  — sequência plana de tokens com tipo, valor, linha, coluna"),
+      code("      ↓ [Parser]"),
+      code("Program(AST) — árvore hierárquica de nós tipados"),
+      code("      ↓ [SemanticAnalyzer]"),
+      code("SymbolTable  — tabela de símbolos validada + erros em exceção"),
+      code("      ↓ [IRGenerator]         (paralelo ao Code Generator)"),
+      code("List[str]    — código intermediário TAC legível"),
+      code("      ↓ [BytecodeGenerator]"),
+      code("List[str]    — bytecode de pilha (PUSH, LOAD, STORE, ADD, JUMP...)"),
+      code("      ↓ [VirtualMachine]"),
+      code("List[str]    — output do programa (o que foi impresso pelo print)"),
+    ]),
+    br,
+    h2("2.2  Separação front-end / back-end"),
+    p("O compilador segue a divisão clássica da teoria de compiladores:"),
+    twoColTable(
+      ["Camada", "Módulos"],
+      [
+        ["Front-end (análise)", "Lexer → Parser → SemanticAnalyzer. Trabalha com a linguagem fonte. Detecta todos os erros de programação (léxico, sintático, semântico)."],
+        ["Middle-end", "IRGenerator. Produz representação independente de máquina (código de três endereços). Permite otimizações antes da geração final."],
+        ["Back-end (síntese)", "BytecodeGenerator + VirtualMachine. Trabalham com a representação de execução. O bytecode gerado é específico para esta VM de pilha."],
+      ],
+      [2400, 6960]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 3 — AST NODES
+// ═══════════════════════════════════════════════════════════════════
+function section3() {
+  return [
+    h1("3. ast_nodes.py — Nós da Árvore Sintática Abstrata"),
+    br,
+    h2("3.1  O que é e por que existe"),
+    p("O módulo ast_nodes define a hierarquia de classes que representa cada construção sintática da linguagem Mini. Toda informação do programa, após o parsing, vive como um grafo de objetos dessas classes — a AST (Abstract Syntax Tree)."),
+    p("A escolha de usar @dataclass do Python é intencional: gera automaticamente __init__, __repr__ e __eq__, eliminando boilerplate sem sacrificar clareza. Cada nó carrega exatamente os atributos que uma análise precisa — nem mais, nem menos."),
+    br,
+    h2("3.2  Hierarquia de nós"),
+    twoColTable(
+      ["Classe", "Atributos e semântica"],
+      [
+        ["ASTNode (base)", "Classe vazia. Serve apenas para tipagem. Permite isinstance() nos visitantes."],
+        ["Program", "statements: List[ASTNode] — raiz da árvore; contém todas as instruções do programa."],
+        ["Block", "statements: List[ASTNode] — sequência de instruções dentro de chaves { }. Cria escopo novo."],
+        ["VarDecl", "var_type: str, name: str — declaração como 'int x;'. var_type é 'int' ou 'bool'."],
+        ["Assignment", "name: str, value: ASTNode — atribuição 'x = expr;'. value pode ser qualquer subárvore."],
+        ["Print", "value: ASTNode — instrução print(expr);. Aceita qualquer expressão tipada."],
+        ["Read", "(sem atributos) — chamada read(). Representa leitura da entrada padrão."],
+        ["If", "condition: ASTNode, then_branch: Block, else_branch: Optional[Block]. else é opcional."],
+        ["While", "condition: ASTNode, body: Block — laço com condição booleana."],
+        ["BinaryOp", "left: ASTNode, operator: str, right: ASTNode. Operadores: + – * / < > == !="],
+        ["UnaryOp", "operator: str, operand: ASTNode. Único operador: '-' (negação inteira)."],
+        ["Literal", "value: Any, literal_type: str. Tipos: 'int', 'bool', 'string'."],
+        ["Identifier", "name: str — referência a variável declarada. Resolvida na análise semântica."],
+      ],
+      [2400, 6960]
+    ),
+    br,
+    h2("3.3  Exemplo concreto de AST"),
+    p("Para o trecho de código Mini:"),
+    code("int x;"),
+    code("x = 5 + 3;"),
+    code("print(x);"),
+    br,
+    p("A AST resultante é:"),
+    code("Program(statements=["),
+    code("  VarDecl(var_type='int', name='x'),"),
+    code("  Assignment(name='x',"),
+    code("    value=BinaryOp("),
+    code("      left=Literal(value=5, literal_type='int'),"),
+    code("      operator='+',"),
+    code("      right=Literal(value=3, literal_type='int')),"),
+    code("  Print(value=Identifier(name='x'))"),
+    code("])"),
+    br,
+    h2("3.4  Decisões de design e alternativas"),
+    twoColTable(
+      ["Decisão tomada", "Alternativa possível e trade-offs"],
+      [
+        ["@dataclass para todos os nós", "Poderia usar dicionários Python. Dataclasses garantem tipagem estática (mypy), melhor legibilidade e IDE-friendliness."],
+        ["Sem informação de linha/coluna nos nós", "Compiladores produtivos (ex.: GCC, Clang) armazenam a posição original em cada nó para mensagens de erro precisas. Aqui, o erro já é detectado no Lexer ou Parser (que têm posição via Token)."],
+        ["Optional[Block] para else_branch", "Poderia usar Block vazio. Optional é mais semântico e evita iterações desnecessárias sobre blocos vazios."],
+        ["Hierarquia plana (todos filhos de ASTNode)", "Poderia ter subhierarquias (Statement, Expression). Nesta escala pequena, a hierarquia plana simplifica o código dos visitantes sem custo real."],
+      ],
+      [3400, 5960]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 4 — LEXER
+// ═══════════════════════════════════════════════════════════════════
+function section4() {
+  return [
+    h1("4. lexer.py — Analisador Léxico"),
+    br,
+    h2("4.1  Responsabilidade"),
+    p("O Lexer (também chamado de scanner) é a primeira fase do compilador. Ele lê o código-fonte caractere a caractere e produz uma lista plana de tokens — a menor unidade de significado da linguagem."),
+    p("A classe Token carrega quatro atributos: type (categoria), value (lexema), line e column (posição exata no source). Isso permite mensagens de erro precisas em fases posteriores."),
+    br,
+    h2("4.2  Categorias de tokens reconhecidos"),
+    threeColTable(
+      ["Categoria", "Tokens", "Exemplos"],
+      [
+        ["Palavras reservadas", "INT, BOOL, IF, ELSE, WHILE, PRINT, READ, TRUE, FALSE", "int  bool  while  true"],
+        ["Identificador", "IDENT", "x  myVar  contador_1"],
+        ["Número inteiro", "NUMBER", "0  42  1000"],
+        ["String literal", "STRING", "\"hello\"  \"mundo\""],
+        ["Operadores 1 char", "PLUS MINUS STAR SLASH LT GT ASSIGN SEMICOLON LPAREN RPAREN LBRACE RBRACE", "+ – * / < > = ; ( ) { }"],
+        ["Operadores 2 chars", "EQ  NEQ", "==  !="],
+        ["Fim de arquivo", "EOF", "(implícito)"],
+      ],
+      [2200, 3200, 3960]
+    ),
+    br,
+    h2("4.3  Algoritmo interno — tokenize()"),
+    p("O método tokenize() executa um loop principal sobre o source. A cada iteração:"),
+    nb("Chama skip_whitespace_and_comments() para descartar espaços, tabulações, quebras de linha e comentários (// e /* */)."),
+    nb("Verifica se os próximos dois caracteres formam um operador de 2 caracteres (== ou !=). Se sim, consome ambos e emite o token."),
+    nb("Se o caractere atual começa com letra ou _, chama read_identifier_or_reserved(), que lê até encontrar um não-alfanumérico e depois consulta o dicionário RESERVED para distinguir palavras-chave de identificadores."),
+    nb("Se o caractere é dígito, chama read_number() — lê todos os dígitos consecutivos."),
+    nb('Se o caractere é aspas duplas ("), chama read_string() — lê até a aspas de fechamento ou lança LexerError se encontrar newline ou EOF.'),
+    nb("Se o caractere está em SINGLE_CHAR_TOKENS, emite diretamente."),
+    nb("Caso contrário, lança LexerError com a posição exata do caractere inválido."),
+    br,
+    h2("4.4  Gestão de posição (linha e coluna)"),
+    p("O método advance() avança um caractere e atualiza self.line e self.column. Quando encontra \\n, incrementa line e zera column para 1. Isso garante que toda mensagem de erro mencione linha:coluna precisos."),
+    br,
+    h2("4.5  Look-ahead com peek()"),
+    p("Para distinguir = de == e ! de !=, o Lexer usa peek(offset=1): lê o caractere seguinte sem consumi-lo. Isso é chamado de lookahead de 1 símbolo. A janela de dois caracteres (ch + peek) é comparada contra TWO_CHAR_TOKENS antes de tentar qualquer alternativa de 1 caractere, garantindo que == seja sempre preferido sobre dois = separados."),
+    br,
+    h2("4.6  Tratamento de erros léxicos"),
+    calloutBox("Erros detectados pelo Lexer", [
+      bullet("LexerError: caractere inválido — qualquer símbolo fora do alfabeto da linguagem."),
+      bullet("LexerError: string não fechada — aspas abertas que chegam em newline ou EOF."),
+      bullet("LexerError: comentário de bloco não fechado — /* sem o correspondente */."),
+      p("Todos carregam linha e coluna do ponto exato do erro."),
+    ]),
+    br,
+    h2("4.7  Decisões de design e alternativas"),
+    twoColTable(
+      ["Decisão", "Justificativa / Alternativa"],
+      [
+        ["Lexer manual (handwritten)", "Alternativa seria usar PLY (Python Lex-Yacc) ou ANTLR. O lexer manual é mais simples de depurar, sem dependências externas e suficiente para esta gramática pequena."],
+        ["Token como @dataclass com linha/coluna", "Poderia omitir posição. Com posição, erros sintáticos e semânticos posteriores podem referenciar o token original e dar mensagens como 'linha 5, coluna 12'."],
+        ["Comentários descartados no Lexer", "Alguns compiladores geram tokens de comentário para ferramentas de documentação. Aqui são simplesmente ignorados — decisão correta para um compilador de execução."],
+        ["Sem suporte a números float", "Limitação intencional. Adicioná-los exigiria only detectar o ponto decimal em read_number() e um novo tipo 'float' na tabela de símbolos."],
+      ],
+      [2800, 6560]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 5 — PARSER
+// ═══════════════════════════════════════════════════════════════════
+function section5() {
+  return [
+    h1("5. parser.py — Analisador Sintático"),
+    br,
+    h2("5.1  Responsabilidade"),
+    p("O Parser recebe a List[Token] do Lexer e constrói a AST. Ele verifica se a sequência de tokens obedece à gramática da linguagem Mini. Erros sintáticos são reportados com o token problemático e sua posição."),
+    br,
+    h2("5.2  Técnica: Recursive Descent Parser (RDP)"),
+    p("O Parser usa análise descendente recursiva — uma das técnicas mais simples e eficazes para gramáticas LL(1). Cada regra gramatical se torna um método Python. O método chama outros métodos para sub-regras, e a recursão da chamada de funções reflete a hierarquia da gramática."),
+    p("O lookahead é de 1 token (LL(1)): o parser nunca precisa olhar mais de um token à frente para decidir qual regra aplicar."),
+    br,
+    h2("5.3  Gramática da linguagem Mini (BNF informal)"),
+    code("program     → statement*"),
+    code("statement   → var_decl | assignment | print_stmt | if_stmt | while_stmt"),
+    code("var_decl    → ('int'|'bool') IDENT ';'"),
+    code("assignment  → IDENT '=' expression ';'"),
+    code("print_stmt  → 'print' '(' expression ')' ';'"),
+    code("if_stmt     → 'if' '(' expression ')' block ( 'else' block )?"),
+    code("while_stmt  → 'while' '(' expression ')' block"),
+    code("block       → '{' statement* '}'"),
+    code("expression  → equality"),
+    code("equality    → comparison ( ('=='|'!=') comparison )*"),
+    code("comparison  → term ( ('<'|'>') term )*"),
+    code("term        → factor ( ('+'|'-') factor )*"),
+    code("factor      → unary ( ('*'|'/') unary )*"),
+    code("unary       → '-' unary | primary"),
+    code("primary     → NUMBER | TRUE | FALSE | STRING | 'read()' | IDENT | '(' expression ')'"),
+    br,
+    h2("5.4  Tabela de precedência de operadores"),
+    p("A hierarquia de métodos do parser codifica diretamente a precedência. Quanto mais fundo na cadeia de chamadas, maior a precedência:"),
+    twoColTable(
+      ["Precedência (baixo → alto)", "Operadores / Método"],
+      [
+        ["1 — mais baixa", "== !=   (equality)"],
+        ["2", "< >     (comparison)"],
+        ["3", "+ –     (term)"],
+        ["4", "* /     (factor)"],
+        ["5", "– unário (unary)"],
+        ["6 — mais alta", "literais, ident, (expr)   (primary)"],
+      ],
+      [3500, 5860]
+    ),
+    br,
+    h2("5.5  Métodos utilitários do Parser"),
+    twoColTable(
+      ["Método", "Comportamento"],
+      [
+        ["current()", "Retorna o token atual sem consumir."],
+        ["match(*types)", "Se o token atual é de um dos tipos, avança e retorna True. Caso contrário, retorna False."],
+        ["consume(type, msg)", "Exige que o token atual seja do tipo dado; se sim, consome e retorna. Se não, lança ParserError com msg + posição."],
+        ["previous()", "Retorna o último token consumido. Usado logo após match() para recuperar o valor."],
+      ],
+      [2400, 6960]
+    ),
+    br,
+    h2("5.6  Tratamento de erros sintáticos"),
+    p("Erros sintáticos são lançados como ParserError com descrição do token esperado, token encontrado, linha e coluna. Não há panic mode recovery — o parser para no primeiro erro. Para um compilador de produção, seria desejável recuperar e continuar para reportar múltiplos erros."),
+    br,
+    h2("5.7  Decisões de design e alternativas"),
+    twoColTable(
+      ["Decisão", "Justificativa / Alternativa"],
+      [
+        ["RDP manual vs ANTLR/PLY", "RDP não requer geradores externos, é fácil de depurar e suficiente para LL(k). PLY/ANTLR gerariam código mais robusto para linguagens complexas com ambiguidades."],
+        ["Sem recuperação de erros", "Compiladores de produção (javac, gcc) usam panic-mode ou phrase-level recovery para reportar múltiplos erros. Aqui para no primeiro — adequado para fins didáticos."],
+        ["Precedência codificada na estrutura", "Alternativa: tabela de precedência + Pratt parser. O método atual é mais explícito mas requer uma função por nível. Pratt parser seria mais escalável."],
+        ["Block cria novo escopo no Parser", "O parser constrói o nó Block mas não abre escopo — isso é trabalho do SemanticAnalyzer. Separação de responsabilidades correta."],
+      ],
+      [2800, 6560]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 6 — ANÁLISE SEMÂNTICA
+// ═══════════════════════════════════════════════════════════════════
+function section6() {
+  return [
+    h1("6. semantic.py — Análise Semântica e Tabela de Símbolos"),
+    br,
+    h2("6.1  Responsabilidade"),
+    p("A análise semântica verifica o que a gramática não pode capturar: se variáveis estão declaradas antes do uso, se os tipos são compatíveis, e se as condições de if/while são booleanas. Detecta erros de significado, não de forma."),
+    br,
+    h2("6.2  SymbolTable — Tabela de Símbolos"),
+    p("A SymbolTable é implementada como uma pilha de dicionários (List[Dict[str, str]]). Cada dicionário representa um escopo:"),
+    bullet("O escopo 0 (índice 0) é o escopo global, criado na construção."),
+    bullet("enter_scope() empilha um novo dicionário vazio."),
+    bullet("exit_scope() desempilha o dicionário do topo."),
+    bullet("declare(name, type) registra a variável no escopo atual (topo). Lança SemanticError se já existe no mesmo escopo."),
+    bullet("lookup(name) percorre os escopos de trás para frente (reversed), implementando shadowing: escopos internos sobrescrevem os externos."),
+    bullet("snapshot() retorna um dicionário flat com todas as variáveis visíveis (para depuração)."),
+    br,
+    calloutBox("Exemplo: escopos aninhados", [
+      code("// Escopo global:"),
+      code("int x;          → scopes = [{x: int}]"),
+      code("if (x > 0) {"),
+      code("  int y;        → scopes = [{x: int}, {y: int}]"),
+      code("  // y visível; x visível"),
+      code("}               → scopes = [{x: int}]"),
+      code("// y NÃO mais visível"),
+    ]),
+    br,
+    h2("6.3  SemanticAnalyzer — Verificação de tipos"),
+    p("O SemanticAnalyzer visita cada nó da AST chamando check_statement() ou check_expression(). O padrão de despacho é if isinstance(node, X) — um visitor manual sem framework externo."),
+    br,
+    p("check_expression() retorna o tipo inferido da expressão (string 'int', 'bool' ou 'string'):"),
+    twoColTable(
+      ["Nó", "Tipo retornado / Regra"],
+      [
+        ["Literal", "Retorna literal_type diretamente."],
+        ["Identifier", "Faz lookup na tabela e retorna o tipo registrado. Erro se não declarada."],
+        ["Read()", "Sempre retorna 'int' (simplificação da implementação)."],
+        ["UnaryOp '-'", "Exige operando int, retorna int."],
+        ["BinaryOp + – * /", "Exige ambos int, retorna int."],
+        ["BinaryOp < >", "Exige ambos int, retorna bool."],
+        ["BinaryOp == !=", "Exige tipos iguais (qualquer), retorna bool."],
+      ],
+      [2800, 6560]
+    ),
+    br,
+    h2("6.4  Erros detectados"),
+    calloutBox("Erros semânticos possíveis", [
+      bullet("Variável não declarada: uso de identificador não presente em nenhum escopo visível."),
+      bullet("Variável já declarada: redeclaração no mesmo escopo."),
+      bullet("Tipo incompatível em atribuição: ex. int x; x = true; → esperado int, recebido bool."),
+      bullet("Operador com tipo errado: ex. true + 1 → operador '+' exige operandos inteiros."),
+      bullet("Condição não booleana: if (5) → condição do if deve ser booleana."),
+      bullet("Operador de igualdade com tipos diferentes: 5 == true → tipos incompatíveis."),
+    ]),
+    br,
+    h2("6.5  Sobre buffer e cache na tabela de símbolos"),
+    p("A tabela de símbolos deste compilador é mantida inteiramente em memória RAM, como uma lista Python de dicionários. Não há buffer de disco nem cache externo — a estrutura é compacta o suficiente para residir completamente na memória principal durante a compilação."),
+    p("Em compiladores de produção (como GCC ou LLVM), a tabela de símbolos pode ser externalizada para arquivo temporário quando o programa tem milhares de variáveis e funções, usando estruturas como hash tables com encadeamento externo ou árvores B. Aqui, a abordagem de lista/dict do Python é ideal para o escopo da linguagem Mini."),
+    br,
+    h2("6.6  Decisões de design e alternativas"),
+    twoColTable(
+      ["Decisão", "Justificativa / Alternativa"],
+      [
+        ["Lista de dicts para escopos", "Alternativa: uma única dict com prefixos de escopo (ex: 'global.x'). A lista de dicts é mais legível e o pop/push é O(1)."],
+        ["read() sempre retorna int", "Simplificação pedagógica. Um compilador real adicionaria type inference ou exigiria declaração explícita do tipo de retorno de leitura."],
+        ["Visitor manual com isinstance", "Alternativa: padrão Visitor formal (accept/visit). O isinstance é mais simples em Python mas viola o princípio Open/Closed — adicionar um nó novo exige modificar o SemanticAnalyzer."],
+        ["Sem inferência de tipos", "Toda variável precisa de declaração explícita. Python e Haskell fazem inferência (Hindley-Milner). Adicioná-la tornaria o compilador significativamente mais complexo."],
+      ],
+      [2800, 6560]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 7 — IR GENERATOR
+// ═══════════════════════════════════════════════════════════════════
+function section7() {
+  return [
+    h1("7. ir_generator.py — Geração de Código Intermediário (IR)"),
+    br,
+    h2("7.1  O que é o código intermediário"),
+    p("O IR (Intermediate Representation) é uma representação textual de nível médio — mais baixo que a AST, mais alto que bytecode de máquina. O formato escolhido é TAC (Three-Address Code): cada instrução tem no máximo um operador e três operandos."),
+    p("O IR serve para: inspeção humana do fluxo do programa, possíveis otimizações (eliminação de código morto, propagação de constantes) antes da geração final, e portabilidade — o mesmo IR poderia ser usado para gerar código para diferentes arquiteturas."),
+    br,
+    h2("7.2  Conjunto de instruções IR"),
+    twoColTable(
+      ["Instrução", "Semântica"],
+      [
+        ["decl int x", "Declara variável x do tipo int."],
+        ["x = 5", "Atribuição direta de literal."],
+        ["t1 = a + b", "Operação binária; resultado em temporário."],
+        ["t2 = -x", "Operação unária; resultado em temporário."],
+        ["t3 = read", "Lê da entrada; armazena em temporário."],
+        ["print x", "Imprime variável ou temporário."],
+        ["ifFalse t1 goto L2", "Desvio condicional: se t1 for falso, salta para L2."],
+        ["goto L1", "Desvio incondicional."],
+        ["L1:", "Rótulo (destino de desvio)."],
+      ],
+      [3000, 6360]
+    ),
+    br,
+    h2("7.3  Temporários e rótulos"),
+    p("O IRGenerator mantém dois contadores: temp_count (para nomes t1, t2, t3...) e label_count (para rótulos L1, L2...). Ambos são incrementados monotonicamente — nunca reutilizados — garantindo que não haja conflito de nomes em expressões complexas aninhadas."),
+    br,
+    h2("7.4  Exemplo de IR gerado"),
+    p("Para o código Mini:"),
+    code("int x;"),
+    code("x = 5;"),
+    code("if (x > 3) { print(x); } else { print(0); }"),
+    br,
+    p("O IR gerado seria:"),
+    code("decl int x"),
+    code("x = 5"),
+    code("t1 = x > 3"),
+    code("ifFalse t1 goto L1"),
+    code("print x"),
+    code("goto L2"),
+    code("L1:"),
+    code("print 0"),
+    code("L2:"),
+    br,
+    h2("7.5  Relação com o BytecodeGenerator"),
+    p("O IRGenerator e o BytecodeGenerator são duas formas diferentes de serializar a mesma AST. O IR é string humano-legível com variáveis nomeadas; o bytecode é string de instruções de pilha sem nomes de variáveis intermediárias. Em um compilador real, o IR viria antes e o bytecode seria gerado a partir do IR. Aqui ambos são gerados diretamente da AST, em paralelo."),
+    br,
+    h2("7.6  Alternativas de representação intermediária"),
+    twoColTable(
+      ["Alternativa", "Trade-offs"],
+      [
+        ["SSA (Static Single Assignment)", "Usada por LLVM. Cada variável é atribuída exatamente uma vez; facilita otimizações como propagação de constantes. Mais complexo de implementar."],
+        ["Grafo de fluxo de controle (CFG)", "Representa o programa como blocos básicos ligados por arestas de desvio. Essencial para otimizações de loop. Complexidade maior."],
+        ["AST anotada", "Usar a própria AST com atributos extras ao invés de produzir strings. Evita o passo de parsing do IR mas mistura responsabilidades."],
+        ["TAC em memória (objetos)", "Em vez de strings, usar dataclasses para cada instrução IR. Mais estruturado para otimizações. Aqui strings são suficientes para o uso atual (display)."],
+      ],
+      [2800, 6560]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 8 — CODE GENERATOR
+// ═══════════════════════════════════════════════════════════════════
+function section8() {
+  return [
+    h1("8. code_generator.py — Geração de Bytecode"),
+    br,
+    h2("8.1  O que é bytecode de pilha"),
+    p("O BytecodeGenerator traduz a AST para uma sequência de instruções de uma máquina de pilha (stack machine). Neste modelo, todas as operações consomem e produzem valores no topo de uma pilha de dados. Não há registradores nomeados — a pilha é o único meio de passagem de dados entre instruções."),
+    p("O modelo de pilha é escolhido por sua simplicidade de implementação e uso didático (é o mesmo modelo da JVM, CPython e .NET CLR)."),
+    br,
+    h2("8.2  Conjunto completo de instruções bytecode"),
+    threeColTable(
+      ["Instrução", "Argumento", "Efeito na pilha / variáveis"],
+      [
+        ["DECLARE", "nome", "Cria variável com valor 0; sem efeito na pilha."],
+        ["PUSH_INT", "n", "Empilha inteiro n."],
+        ["PUSH_BOOL", "true/false", "Empilha booleano."],
+        ["PUSH_STRING", "'s'", "Empilha string (literal Python avaliado com ast.literal_eval)."],
+        ["LOAD", "nome", "Lê variável nome; empilha seu valor."],
+        ["STORE", "nome", "Desempilha topo; armazena em nome."],
+        ["READ", "—", "Lê int da entrada; empilha."],
+        ["PRINT", "—", "Desempilha topo; imprime."],
+        ["ADD", "—", "pop b, pop a; push a+b"],
+        ["SUB", "—", "pop b, pop a; push a-b"],
+        ["MUL", "—", "pop b, pop a; push a*b"],
+        ["DIV", "—", "pop b, pop a; push a//b (divisão inteira)"],
+        ["EQ", "—", "pop b, pop a; push a==b"],
+        ["NEQ", "—", "pop b, pop a; push a!=b"],
+        ["LT", "—", "pop b, pop a; push a<b"],
+        ["GT", "—", "pop b, pop a; push a>b"],
+        ["NEG", "—", "pop a; push -a"],
+        ["JUMP", "label", "IP ← posição do label (desvio incondicional)."],
+        ["JUMP_IF_FALSE", "label", "pop cond; se falso, IP ← posição do label."],
+        ["LABEL", "nome", "Marca posição; sem efeito em execução."],
+        ["HALT", "—", "Para a execução."],
+      ],
+      [2000, 1800, 5560]
+    ),
+    br,
+    h2("8.3  Padrão de geração para expressões"),
+    p("gen_expression() gera código de forma pós-fixa (postfix). Para uma BinaryOp:"),
+    nb("Chama gen_expression(left) — empilha o valor esquerdo."),
+    nb("Chama gen_expression(right) — empilha o valor direito."),
+    nb("Emite a instrução do operador (ex.: ADD) — consome os dois topos e empilha o resultado."),
+    br,
+    p("Para Identifier, emite LOAD nome. Para Literal, emite PUSH_INT/BOOL/STRING."),
+    br,
+    h2("8.4  Padrão de geração para if/while"),
+    p("Controle de fluxo usa rótulos gerados dinamicamente com new_label() (LBL1, LBL2...):"),
+    br,
+    calloutBox("Padrão If-Else em bytecode", [
+      code("gen_expression(condition)   ; empilha bool"),
+      code("JUMP_IF_FALSE else_label    ; se falso, pula para else"),
+      code("  [instruções do then]"),
+      code("JUMP end_label             ; pula o else"),
+      code("LABEL else_label"),
+      code("  [instruções do else]"),
+      code("LABEL end_label"),
+    ]),
+    br,
+    calloutBox("Padrão While em bytecode", [
+      code("LABEL start_label"),
+      code("  gen_expression(condition) ; empilha bool"),
+      code("  JUMP_IF_FALSE end_label   ; se falso, sai do loop"),
+      code("  [instruções do corpo]"),
+      code("  JUMP start_label          ; volta ao início"),
+      code("LABEL end_label"),
+    ]),
+    br,
+    h2("8.5  Decisões de design e alternativas"),
+    twoColTable(
+      ["Decisão", "Justificativa / Alternativa"],
+      [
+        ["Bytecode como List[str]", "Simples de depurar e inspecionar. Compiladores reais usam arrays de bytes binários (ex.: .class da JVM) para eficiência. Para fins didáticos, strings são perfeitas."],
+        ["DIV usa divisão inteira (//)", "Mini só tem int. Divisão inteira é o comportamento correto. Se houvesse float, seria necessário distinguir os tipos no gerador."],
+        ["Labels pré-indexados na VM", "A VM faz uma passagem prévia (_index_labels) para mapear LABEL X → posição. Alternativa: resolver labels na geração de código (backpatching). A pré-indexação é mais simples."],
+        ["Sem otimizações no bytecode", "Um compilador de produção faria peephole optimization (ex.: eliminar PUSH + POP imediato). Aqui nenhuma otimização é aplicada — cada expressão gera as instruções literais."],
+      ],
+      [2800, 6560]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 9 — VIRTUAL MACHINE
+// ═══════════════════════════════════════════════════════════════════
+function section9() {
+  return [
+    h1("9. vm.py — Máquina Virtual"),
+    br,
+    h2("9.1  Responsabilidade"),
+    p("A VirtualMachine é o executor final. Recebe a lista de strings de bytecode e a interpreta instrução a instrução, mantendo uma pilha de valores (self.stack), um dicionário de variáveis (self.variables), uma tabela de rótulos (self.labels) e um ponteiro de instrução (self.ip)."),
+    br,
+    h2("9.2  Estado interno da VM"),
+    twoColTable(
+      ["Atributo", "Tipo e função"],
+      [
+        ["self.bytecode", "List[str] — a lista de instruções recebida do BytecodeGenerator."],
+        ["self.ip", "int — instruction pointer. Índice da próxima instrução a executar."],
+        ["self.stack", "List[Any] — pilha de operandos. Cresce para a direita; pop() retira o topo."],
+        ["self.variables", "Dict[str, Any] — memória de variáveis. Chave: nome; Valor: int, bool ou str."],
+        ["self.labels", "Dict[str, int] — mapa de nome_do_label → índice na lista bytecode. Preenchido em _index_labels() antes da execução."],
+        ["self.inputs", "List[int] — entradas pré-fornecidas (modo batch). Se vazia, READ faz input() interativo."],
+        ["self.output", "List[str] — acumula o que foi impresso (para testes automatizados)."],
+      ],
+      [2400, 6960]
+    ),
+    br,
+    h2("9.3  Ciclo de execução"),
+    p("O método run() executa um loop fetch-decode-execute:"),
+    nb("Fetch: lê bytecode[self.ip] e incrementa ip."),
+    nb("Decode: divide a instrução em op (opcode) e arg (argumento opcional) com split(maxsplit=1)."),
+    nb("Execute: dispatcha para o bloco elif correspondente ao opcode."),
+    br,
+    h2("9.4  Pré-indexação de labels"),
+    p("Antes de run(), o método _index_labels() varre todo o bytecode e mapeia cada instrução LABEL X para seu índice. Isso permite que JUMP e JUMP_IF_FALSE façam desvios em O(1) via dicionário, sem precisar varrer o bytecode a cada salto."),
+    br,
+    h2("9.5  Gestão de memória — pilha vs variáveis"),
+    p("A VM mantém dois espaços de memória distintos:"),
+    twoColTable(
+      ["Espaço", "Característica"],
+      [
+        ["Pilha (self.stack)", "Temporária. Usada para cálculos intermediários. Cresce e encolhe a cada expressão. Uma expressão bem formada sempre deixa a pilha no mesmo tamanho que encontrou (exceto pelos valores de retorno)."],
+        ["Variáveis (self.variables)", "Persistente durante a execução. Inicializada com 0 pelo DECLARE. Modificada apenas por STORE. Lida por LOAD."],
+      ],
+      [2800, 6560]
+    ),
+    br,
+    p("Não há heap separado, alocação dinâmica nem garbage collector — a linguagem Mini não tem estruturas compostas, ponteiros ou objetos. Toda a 'memória' cabe em um único dicionário Python."),
+    br,
+    h2("9.6  Tratamento de strings (ast.literal_eval)"),
+    p("Para PUSH_STRING, a VM usa ast.literal_eval(arg) para converter a string serializada pelo BytecodeGenerator (ex.: \"'hello'\") de volta para string Python. Isso é seguro (ast.literal_eval não executa código arbitrário) e correto para strings com caracteres especiais ou escapes."),
+    br,
+    h2("9.7  Modos de entrada — interativo vs batch"),
+    p("A instrução READ tem dois comportamentos:"),
+    bullet("Se self.inputs não está vazia: desempilha int(inputs.pop(0)) — modo batch, ideal para testes automatizados."),
+    bullet("Se self.inputs está vazia: chama int(input('read> ')) — modo interativo, o usuário digita no terminal."),
+    br,
+    h2("9.8  Tratamento de erros em runtime"),
+    calloutBox("Erros detectados pela VM", [
+      bullet("VMError: 'Pilha vazia' — pop() em pilha vazia. Indica bug no gerador de código."),
+      bullet("VMError: 'Variável X não existe' — LOAD ou STORE antes de DECLARE. Indica bug no gerador (a análise semântica deveria ter prevenido)."),
+      bullet("VMError: 'Instrução desconhecida' — opcode não reconhecido. Indica geração de bytecode inválido."),
+      p("Erros de runtime (ex.: divisão por zero) não são tratados — são levantados como ZeroDivisionError do Python."),
+    ]),
+    br,
+    h2("9.9  Decisões de design e alternativas"),
+    twoColTable(
+      ["Decisão", "Justificativa / Alternativa"],
+      [
+        ["Bytecode como strings", "Fácil de debugar (print da lista legível). Ineficiente para grandes programas. JVM usa array de bytes binários com opcodes numéricos."],
+        ["Variáveis em Dict Python", "Acesso O(1) médio. Em VMs de produção, variáveis locais ficam em um array indexado (frame stack) para acesso O(1) sem hashing."],
+        ["Sem frame stack para funções", "Mini não tem funções. Adicionar suporte a funções exigiria um frame stack (um frame por chamada com variáveis locais e endereço de retorno)."],
+        ["Sem cache de instruções", "Cada instrução é re-parseada (split) a cada ciclo. Um compilador JIT cacheia a instrução decodificada. Para Mini, o custo é negligenciável."],
+        ["Divisão inteira com //", "Comportamento correto para tipos int. Se houvesse overflow, Python gerencia automaticamente com inteiros arbitrários."],
+      ],
+      [2800, 6560]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 10 — ARQUIVOS DE TESTE
+// ═══════════════════════════════════════════════════════════════════
+function section10() {
+  return [
+    h1("10. Arquivos de Teste (.mini)"),
+    br,
+    p("O projeto inclui quatro arquivos de teste. Importante: os nomes dos arquivos não correspondem ao conteúdo real (foram embaralhados no upload). A análise abaixo é baseada no conteúdo real de cada arquivo."),
+    br,
+    h2("10.1  valido3_read.mini — programa simples com if/else"),
+    p("Conteúdo real:"),
+    code("int x;  int y;  bool maior;"),
+    code("x = 10;  y = 5;  maior = x > y;"),
+    code("if (maior) { print(x); } else { print(y); }"),
+    br,
+    p("Exercita: declaração de int e bool, operação de comparação (x > y) retornando bool, atribuição de bool, if/else. Saída esperada: 10."),
+    br,
+    h2("10.2  erro_variavel_nao_declarada.mini — programa com while"),
+    p("Conteúdo real (programa válido):"),
+    code("int x;  x = 5;"),
+    code("while (x > 0) { print(x);  x = x - 1; }"),
+    br,
+    p("Apesar do nome, este arquivo contém um programa válido que exercita o laço while com decremento. Saída esperada: 5 4 3 2 1 (um por linha)."),
+    br,
+    h2("10.3  erro_tipo.mini — programa com read()"),
+    p("Conteúdo real:"),
+    code("int numero;"),
+    code("numero = read();"),
+    code("if (numero > 10) { print(1); } else { print(0); }"),
+    br,
+    p("Programa válido que exercita read() e comparação com valor lido. Para rodar: python main.py arquivo.mini --run --input 8 → saída: 0."),
+    br,
+    h2("10.4  erro_sintatico.mini — atribuição sem declaração"),
+    p("Conteúdo real:"),
+    code("x = 10;"),
+    br,
+    p("Este programa provoca um erro semântico (não sintático): a variável x é usada sem ter sido declarada. O SemanticAnalyzer lança: SemanticError: Variável 'x' não declarada."),
+    br,
+    h2("10.5  Resumo dos casos de teste"),
+    twoColTable(
+      ["Arquivo", "O que realmente testa"],
+      [
+        ["valido3_read.mini", "int + bool + comparação + if/else → programa válido."],
+        ["erro_variavel_nao_declarada.mini", "while com decremento → programa válido."],
+        ["erro_tipo.mini", "read() + if/else → programa válido com entrada."],
+        ["erro_sintatico.mini", "x = 10; sem int x; → SemanticError: variável não declarada."],
+      ],
+      [3200, 6160]
+    ),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 11 — TRATAMENTO DE ERROS CONSOLIDADO
+// ═══════════════════════════════════════════════════════════════════
+function section11() {
+  return [
+    h1("11. Tratamento de Erros — Visão Consolidada"),
+    br,
+    p("Cada fase do compilador detecta um conjunto específico de erros e os comunica através de exceções Python com mensagens descritivas. A abordagem é fail-fast: o compilador para na primeira fase que detecta um erro."),
+    br,
+    threeColTable(
+      ["Fase", "Exceção", "Exemplos de erros detectados"],
+      [
+        ["Lexer", "LexerError", "Caractere inválido @; string não fechada; comentário de bloco não fechado."],
+        ["Parser", "ParserError", "Token inesperado; ';' ausente; '{' ou '}' faltando; expressão inválida."],
+        ["SemanticAnalyzer", "SemanticError", "Variável não declarada; redeclaração; tipo incompatível; condição não booleana."],
+        ["IRGenerator", "ValueError", "Nó AST não suportado (indica bug interno, não erro do usuário)."],
+        ["BytecodeGenerator", "ValueError", "Nó AST não suportado (idem)."],
+        ["VirtualMachine", "VMError", "Pilha vazia; variável inexistente em LOAD/STORE; opcode desconhecido."],
+        ["VM — runtime", "ZeroDivisionError (Python)", "Divisão por zero não tratada explicitamente."],
+      ],
+      [2000, 2200, 5160]
+    ),
+    br,
+    h2("11.1  Ausência de recuperação de erros"),
+    p("O compilador implementa apenas detecção de erro, não recuperação. Ao detectar o primeiro erro em qualquer fase, uma exceção é lançada e a compilação para. Compiladores de produção implementam recuperação para reportar múltiplos erros em uma única passagem, mas isso adiciona complexidade considerável."),
+    br,
+    h2("11.2  Qualidade das mensagens de erro"),
+    p("As mensagens incluem: linha e coluna (erros léxicos e sintáticos, via Token), nome da variável (erros semânticos), tipo esperado vs recebido (erros de tipo). Isso é suficiente para identificar e corrigir a maioria dos erros rapidamente."),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 12 — MEMÓRIA, BUFFER E CACHE
+// ═══════════════════════════════════════════════════════════════════
+function section12() {
+  return [
+    h1("12. Memória, Buffer e Cache — Análise Técnica"),
+    br,
+    h2("12.1  Modelo de memória geral"),
+    p("Todo o pipeline do compilador opera completamente em memória RAM. Não há I/O de disco durante a compilação além da leitura inicial do arquivo .mini. A sequência de representações em memória é:"),
+    twoColTable(
+      ["Representação", "Estrutura Python"],
+      [
+        ["Código-fonte", "str — lido de uma vez com open().read()."],
+        ["Lista de tokens", "List[Token] — gerada pelo Lexer."],
+        ["AST", "Grafo de objetos dataclass — gerado pelo Parser."],
+        ["Tabela de símbolos", "List[Dict[str, str]] — pilha de escopos do SemanticAnalyzer."],
+        ["IR (código intermediário)", "List[str] — gerado pelo IRGenerator."],
+        ["Bytecode", "List[str] — gerado pelo BytecodeGenerator."],
+        ["Estado da VM", "List[Any] (pilha) + Dict[str, Any] (variáveis) + Dict[str, int] (labels)."],
+      ],
+      [2800, 6560]
+    ),
+    br,
+    h2("12.2  Buffer de leitura do código-fonte"),
+    p("O Lexer lê o código-fonte como uma única string Python em memória (self.source = source). Não há buffer de leitura em chunks — o arquivo inteiro é carregado de uma vez. Isso é aceitável para arquivos .mini tipicamente pequenos (alguns kilobytes)."),
+    p("Em compiladores de produção (como GCC), o pré-processador usa buffers circulares de tamanho fixo (ex.: 4KB) para ler arquivos grandes sem esgotar a memória. Para Mini, a abordagem de string completa é mais simples e sem desvantagens práticas."),
+    br,
+    h2("12.3  Ponteiro de leitura do Lexer"),
+    p("O Lexer mantém self.pos como um índice inteiro na string source. O acesso source[pos] é O(1) — strings Python são arrays de caracteres em C internamente. Não há cópia de substrings durante a leitura (exceto na construção dos lexemas em text += advance()), o que poderia ser otimizado com start/end indices em vez de concatenação."),
+    br,
+    h2("12.4  Cache de labels na VM"),
+    p("A VM implementa uma forma de cache via _index_labels(): antes da execução, varre o bytecode uma vez e constrói self.labels: Dict[str, int]. Durante a execução, JUMP e JUMP_IF_FALSE fazem self.ip = self.labels[arg] — acesso O(1) ao invés de busca linear O(n) a cada salto. Este é o principal mecanismo de cache do sistema."),
+    br,
+    h2("12.5  Pilha da VM como buffer de operandos"),
+    p("A self.stack da VM funciona como um buffer LIFO (Last-In-First-Out) de operandos. Cada instrução aritmética ou lógica consome valores do topo e produz um resultado. A pilha cresce dinamicamente com append() e encolhe com pop() — ambas operações O(1) amortizado na implementação Python."),
+    br,
+    h2("12.6  Ausência de JIT e cache de bytecode"),
+    p("Este compilador não implementa cache de bytecode em disco (como o .pyc do Python) nem compilação JIT (Just-In-Time). Cada execução recompila do zero. Para a escala de programas .mini, isso é negligenciável."),
+    br,
+    h2("12.7  Output como buffer acumulador"),
+    p("A VM acumula as saídas em self.output: List[str] além de imprimir diretamente com print(). Isso permite que testes automatizados verifiquem o output sem capturar stdout, simplificando a construção de testes unitários."),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 13 — DETALHES TÉCNICOS E COMO FAZER DIFERENTE
+// ═══════════════════════════════════════════════════════════════════
+function section13() {
+  return [
+    h1("13. Detalhes Técnicos Avançados e Como Fazer Diferente"),
+    br,
+    h2("13.1  Por que Python para implementar o compilador"),
+    p("Python foi escolhido por sua expressividade e pelo fato de que dataclasses, isinstance, listas e dicionários mapeiam diretamente para as estruturas naturais de um compilador (nós, tabelas, listas de instruções). O custo é desempenho — um compilador Python é ordens de magnitude mais lento que um em C/C++ — mas para fins didáticos isso é irrelevante."),
+    br,
+    h2("13.2  O que poderia ser feito diferente (melhorias técnicas)"),
+    twoColTable(
+      ["Aspecto", "Melhoria possível e justificativa"],
+      [
+        ["Lexer sem concatenação", "Usar índices start/end em vez de text += ch. Evita criação de N strings temporárias para cada token."],
+        ["Parser com recuperação de erros", "Implementar panic-mode recovery (descarta tokens até encontrar ';' ou '}') para reportar múltiplos erros."],
+        ["Visitor pattern formal", "Usar o padrão Visitor (accept/visit) em vez de isinstance. Permite adicionar novas operações sem modificar os nós."],
+        ["Tipos em enum", "Usar enum.Enum para os tipos ('int', 'bool') em vez de strings. Evita erros de digitação e melhora a tipagem estática."],
+        ["Múltiplos tipos em read()", "Adicionar um parâmetro de tipo a read() ou usar inferência de tipo do contexto de atribuição."],
+        ["Otimizações no IR", "Implementar propagação de constantes, eliminação de código morto e folding de expressões constantes no IR antes do bytecode."],
+        ["Funções e recursão", "Adicionar declaração de função com parâmetros e retorno, e um frame stack na VM para chamadas recursivas."],
+        ["Bytecode binário", "Substituir List[str] por bytes com opcodes numéricos. Reduz tamanho e acelera a VM."],
+        ["Compilação incremental", "Cachear o bytecode em disco (arquivo .minic) e recompilar apenas quando o .mini muda (via hash ou timestamp)."],
+        ["Type annotations completas", "Adicionar tipos de retorno explícitos em todos os métodos e usar mypy para verificação estática do próprio compilador."],
+      ],
+      [2800, 6560]
+    ),
+    br,
+    h2("13.3  Limitações conhecidas da implementação atual"),
+    twoColTable(
+      ["Limitação", "Impacto"],
+      [
+        ["read() sempre retorna int", "Não é possível ler booleanos ou strings da entrada."],
+        ["Sem funções nem procedimentos", "Programas não podem modularizar código em sub-rotinas."],
+        ["Sem arrays ou structs", "Só escalares. Programas complexos de dados não são expressos."],
+        ["Sem operador lógico AND/OR/NOT", "Condições compostas precisam ser aninhadas."],
+        ["Divisão por zero não tratada", "Lança ZeroDivisionError do Python sem mensagem amigável."],
+        ["Sem módulos ou imports", "Toda a lógica precisa estar em um único arquivo .mini."],
+        ["Apenas int (sem float)", "Cálculos com ponto flutuante não são possíveis."],
+      ],
+      [2800, 6560]
+    ),
+    br,
+    h2("13.4  Como estender a linguagem — roteiro prático"),
+    nb("Adicionar um novo token: inserir em RESERVED ou SINGLE_CHAR_TOKENS no Lexer."),
+    nb("Adicionar um novo nó AST: criar @dataclass em ast_nodes.py."),
+    nb("Adicionar nova sintaxe: adicionar um método no Parser e atualizar statement()."),
+    nb("Adicionar verificação semântica: adicionar um elif isinstance() em check_statement() ou check_expression()."),
+    nb("Gerar IR para o novo construto: adicionar elif no IRGenerator."),
+    nb("Gerar bytecode: adicionar elif no BytecodeGenerator e o opcode correspondente."),
+    nb("Executar na VM: adicionar elif para o novo opcode no loop run() da VM."),
+    br,
+    p("A arquitetura modular do compilador torna cada extensão localizada e bem delimitada — cada fase pode ser modificada independentemente das outras."),
+    new Paragraph({ children: [new PageBreak()] }),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SEÇÃO 14 — GLOSSÁRIO
+// ═══════════════════════════════════════════════════════════════════
+function section14() {
+  return [
+    h1("14. Glossário de Termos"),
+    br,
+    twoColTable(
+      ["Termo", "Definição"],
+      [
+        ["AST (Abstract Syntax Tree)", "Árvore que representa a estrutura hierárquica do programa, sem detalhes sintáticos irrelevantes (como parênteses)."],
+        ["Bytecode", "Sequência de instruções de baixo nível para uma máquina virtual específica. Mais abstrato que código de máquina real."],
+        ["Front-end", "Fases do compilador dependentes da linguagem fonte: análise léxica, sintática e semântica."],
+        ["Back-end", "Fases dependentes do alvo: geração de código intermediário, geração de bytecode, execução."],
+        ["IR (Intermediate Representation)", "Representação intermediária independente de máquina, entre a AST e o bytecode final."],
+        ["Lexer / Scanner", "Componente que transforma código-fonte em tokens."],
+        ["LL(1)", "Classe de gramáticas analisáveis com descida recursiva usando 1 token de lookahead."],
+        ["Lookahead", "Capacidade de olhar tokens (ou caracteres) futuros sem consumir, para decidir qual regra aplicar."],
+        ["Parser", "Componente que constrói a AST a partir dos tokens, verificando a gramática."],
+        ["Pilha (Stack Machine)", "Modelo de execução onde operações usam uma pilha LIFO para passar dados entre instruções."],
+        ["RDP (Recursive Descent Parser)", "Técnica de parsing onde cada regra gramatical corresponde a um método recursivo."],
+        ["Símbolos / Symbol Table", "Estrutura de dados que mapeia nomes de variáveis para seus tipos e escopos."],
+        ["TAC (Three-Address Code)", "Formato de IR onde cada instrução tem no máximo 3 operandos: result = op1 operator op2."],
+        ["Token", "Unidade atômica de significado léxico: palavra-chave, identificador, operador, literal, etc."],
+        ["VM (Virtual Machine)", "Executor de bytecode que simula uma máquina abstrata com pilha, memória e registrador de instrução."],
+      ],
+      [2800, 6560]
+    ),
+  ];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// DOCUMENTO FINAL
+// ═══════════════════════════════════════════════════════════════════
+const doc = new Document({
+  styles: {
+    default: {
+      document: { run: { font: "Arial", size: 22, color: C.gray } }
+    },
+    paragraphStyles: [
+      { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
+        run: { size: 36, bold: true, font: "Arial", color: C.white },
+        paragraph: { spacing: { before: 360, after: 200 }, outlineLevel: 0 } },
+      { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true,
+        run: { size: 28, bold: true, font: "Arial", color: C.blue },
+        paragraph: { spacing: { before: 280, after: 120 }, outlineLevel: 1 } },
+      { id: "Heading3", name: "Heading 3", basedOn: "Normal", next: "Normal", quickFormat: true,
+        run: { size: 24, bold: true, font: "Arial", color: C.blue2 },
+        paragraph: { spacing: { before: 200, after: 80 }, outlineLevel: 2 } },
+    ]
+  },
+  numbering: {
+    config: [
+      { reference: "bullets",
+        levels: [
+          { level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 720, hanging: 360 } } } },
+          { level: 1, format: LevelFormat.BULLET, text: "◦", alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 1080, hanging: 360 } } } },
+        ]
+      },
+      { reference: "numbers",
+        levels: [
+          { level: 0, format: LevelFormat.DECIMAL, text: "%1.", alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 720, hanging: 360 } } } }
+        ]
+      },
+    ]
+  },
+  sections: [{
+    properties: {
+      page: {
+        size: { width: 12240, height: 15840 },
+        margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 }
+      }
+    },
+    headers: {
+      default: new Header({
+        children: [new Paragraph({
+          children: [new TextRun({ text: "MiniLang Compiler — Documentação Técnica Completa", size: 18, color: C.blue2, font: "Arial", italics: true })],
+          border: { bottom: { style: BorderStyle.SINGLE, size: 2, color: C.blue3, space: 1 } },
+        })]
+      })
+    },
+    footers: {
+      default: new Footer({
+        children: [new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: "Página ", size: 18, color: C.gray2, font: "Arial" }),
+                     new TextRun({ children: [PageNumber.CURRENT], size: 18, color: C.gray2, font: "Arial" }),
+                     new TextRun({ text: " de ", size: 18, color: C.gray2, font: "Arial" }),
+                     new TextRun({ children: [PageNumber.TOTAL_PAGES], size: 18, color: C.gray2, font: "Arial" })],
+        })]
+      })
+    },
+    children: [
+      ...pageCover(),
+      ...section1(),
+      ...section2(),
+      ...section3(),
+      ...section4(),
+      ...section5(),
+      ...section6(),
+      ...section7(),
+      ...section8(),
+      ...section9(),
+      ...section10(),
+      ...section11(),
+      ...section12(),
+      ...section13(),
+      ...section14(),
+    ]
+  }]
+});
+
+Packer.toBuffer(doc).then(buffer => {
+  fs.writeFileSync("/mnt/user-data/outputs/MiniLang_Documentacao_Tecnica.docx", buffer);
+  console.log("Documento gerado com sucesso!");
+}).catch(err => {
+  console.error("Erro:", err);
+  process.exit(1);
+});
